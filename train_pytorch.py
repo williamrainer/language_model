@@ -1,29 +1,24 @@
-
-
-# TODO: architecture_sampling.Dataset._batchify(include_lengths=True) returns len of each sentence.
-# Use lengths as parameter?????
 def forwardComputeLoss(self, batch, indvLoss):
-    _, context = self.models.encoder.forward(batch)
+    # vector of sentence lengths
+    lengths = batch[0][1]
+    _, context = self.models.encoder(batch)
     loss = 0
-    # batchSize = number of sentences in the batch
-    indvAvgLoss = torch.zeros(batch.batchSize)
+    indvAvgLoss = torch.zeros(batch.size(0))
 
-    # TODO: sourceLength = max length in source batch.
-    for t in range(batch.sourceLength-1):
-        genOutputs = self.models.generator.forward(context.select(2, t))
+    for t in range(max(lengths)-1):
+        genOutputs = self.models.generator(context.select(1, t))
 
         # LanguageModel is supposed to predict the following word.
-        # TODO: isn't this is always true??
-        if t != batch.sourceLength-1:
-            #TODO: Get source input batch at timestep `t`. If `t` is None, returns the whole sequence.   onmt/data/Batch.lua
-            output = batch.getSourceInput(t+1)
+        if t != max(lengths)-1:
+            # Source input batch at timestep `t+1`
+            output = batch[:, t+1]
 
         # Same format with and without features.
         if not torch.is_tensor(output):
             output = torch.tensor(output)
 
         if indvLoss:
-            for i in range(batch.batchSize):
+            for i in range(batch.size(0)):
                 tmpPred = []
                 tmpOutput = []
                 for j in range(genOutputs.size(0)):
@@ -37,46 +32,43 @@ def forwardComputeLoss(self, batch, indvLoss):
                 loss = loss + tmpLoss
 
         else:
-            loss = loss + self.criterion.forward(genOutputs, output)
+            loss = loss + self.criterion(genOutputs, output)
 
     if indvLoss:
-        # TODO: batch.sourceSize = lengths of each source   (dim = batch x 1)
-        indvAvgLoss = torch.div(indvAvgLoss, batch.sourceSize.double())
+        indvAvgLoss = torch.div(indvAvgLoss, torch.FloatTensor(lengths))
     return loss, indvAvgLoss
 
 
 
 def trainNetwork(self, batch):
+    # vector of sentence lengths
+    lengths = batch[0][1]
     loss = 0
-    _, context = self.models.encoder.forward(batch)
-    #TODO: zero_grad() ??
-    gradContexts = context.clone().zero()
+    _, context = self.models.encoder(batch)
+    gradContexts = torch.zeros(batch.size())
 
     # For each word of the sentence, generate target.
-    for t in range(batch.sourceLength-1):
-        genOutputs = self.models.generator.forward(context.select(2, t))
+    for t in range(max(lengths)-1):
+        genOutputs = self.models.generator(context.select(1, t))
 
         # LanguageModel is supposed to predict following word.
-        if t != batch.sourceLength-1:
-            # TODO: Get source input batch at timestep `t`. If `t` is None, returns the whole sequence.   see: onmt/data/Batch.lua
-            output = batch.getSourceInput(t + 1)
+        if t != max(lengths)-1:
+            # Source input batch at timestep `t+1`.
+            output = batch[:, t+1]
 
         # Same format with and without features.
         if not torch.is_tensor(output):
             output = torch.tensor(output)
-        loss = loss + self.criterion.forward(genOutputs, output)
 
+        loss = loss + self.criterion(genOutputs, output)
         genGradOutput = self.criterion.backward(genOutputs, output)
         for j in range(genGradOutput.size(0)):
-            # TODO: batch.size(0)?? see: onmt/data/Batch.lua
-            genGradOutput[j] /= batch.batchSize
+            genGradOutput[j] /= batch.size(0)
 
-        #TODO: set it equal to the copy??
-        gradContexts[:, t].copy(self.models.generator.backward(context.select(2, t), genGradOutput))
+        gradContexts[:, t] = self.models.generator.backward(context.select(1, t), genGradOutput).copy()
 
     self.models.encoder.backward(batch, None, gradContexts)
     return loss
-
 
 
 
@@ -103,4 +95,3 @@ class ParallelClassNLLCriterion():
         nll.sizeAverage = False
         self.add(nll)
         return nll
-
