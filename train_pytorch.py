@@ -27,7 +27,7 @@ def forwardComputeLoss(self, batch, indvLoss):
                 tmpPred = torch.stack(tmpPred)
                 tmpOutput = torch.stack(tmpOutput)
 
-                tmpLoss = self.criterion.forward(tmpPred, tmpOutput)
+                tmpLoss = self.criterion(tmpPred, tmpOutput)
                 indvAvgLoss[i] = indvAvgLoss[i] + tmpLoss
                 loss = loss + tmpLoss
 
